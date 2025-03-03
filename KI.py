@@ -2,69 +2,105 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
+import face_recognition
 
 
-# Funktion zur Verarbeitung des Bildes
 def process_image():
-    # Datei-Dialog öffnen
-    input_path = filedialog.askopenfilename(filetypes=[("Bilder", "*.jpg;*.jpeg;*.png;*.webp")])
+    # Открываем диалог выбора файла
+    input_path = filedialog.askopenfilename(filetypes=[("Bilder", "*.jpg;*.jpeg;*.png;*.webp;*.tiff;*.tif")])
 
     if not input_path:
-        return  # Falls keine Datei ausgewählt wurde, nichts tun
+        return  # Если файл не выбран, выходим
 
-    # Zielpfad für das komprimierte Bild
     directory, filename = os.path.split(input_path)
     output_path = os.path.join(directory, f"{os.path.splitext(filename)[0]}_komprimiert.jpg")
 
-    # Bild öffnen
+    # Открываем изображение
     image = Image.open(input_path)
 
-    # Seitenverhältnisse berechnen
-    original_ratio = image.width / image.height
-    target_ratio = 1920 / 1080
+    # Проверяем, есть ли у TIFF несколько страниц (слоев)
+    if hasattr(image, "n_frames") and image.n_frames > 1:
+        image.seek(0)  # Берем первую страницу
 
-    # Neue Größe berechnen, ohne das Seitenverhältnis zu verzerren
-    if original_ratio > target_ratio:
-        new_width = 1920
-        new_height = round(1920 / original_ratio)
+    # Конвертируем в RGB, если изображение в другом формате (TIFF часто бывает CMYK или с прозрачностью)
+    image = image.convert("RGB")
+
+    # Преобразуем в numpy-массив для face_recognition
+    image_np = face_recognition.load_image_file(input_path)
+
+    # Ищем лица на фото
+    face_locations = face_recognition.face_locations(image_np)
+
+    if face_locations:
+        # Берем первое найденное лицо
+        top, right, bottom, left = face_locations[0]
+
+        # Определяем центр лица
+        face_center_y = (top + bottom) // 2
+
+        # Определяем размеры изображения
+        original_width, original_height = image.size
+        target_ratio = 16 / 9
+
+        # Если изображение слишком широкое – обрезаем по бокам
+        if original_width / original_height > target_ratio:
+            new_width = int(original_height * target_ratio)
+            new_height = original_height
+            left = (original_width - new_width) // 2
+            top = 0
+        else:
+            # Если изображение слишком высокое – обрезаем сверху/снизу
+            new_width = original_width
+            new_height = int(original_width / target_ratio)
+            left = 0
+            top = max(0, face_center_y - new_height // 2)
+
+        # Обрезаем изображение
+        image_cropped = image.crop((left, top, left + new_width, top + new_height))
     else:
-        new_height = 1080
-        new_width = round(1080 * original_ratio)
+        # Если лиц нет – центрируем как обычно
+        original_width, original_height = image.size
+        target_ratio = 16 / 9
+        if original_width / original_height > target_ratio:
+            new_width = int(original_height * target_ratio)
+            new_height = original_height
+            left = (original_width - new_width) // 2
+            top = 0
+        else:
+            new_width = original_width
+            new_height = int(original_width / target_ratio)
+            left = 0
+            top = (original_height - new_height) // 2
+        image_cropped = image.crop((left, top, left + new_width, top + new_height))
 
-    # Bild proportional skalieren
-    image_resized = image.resize((new_width, new_height), Image.LANCZOS)
+    # Масштабируем до 1920x1080
+    image_resized = image_cropped.resize((1920, 1080), Image.LANCZOS)
 
-    # Neuen 1920x1080 Hintergrund mit schwarzer Farbe erstellen
-    canvas = Image.new("RGB", (1920, 1080), (0, 0, 0))  # (0,0,0) = Schwarz, (255,255,255) = Weiß
-
-    # Bild in die Mitte des Hintergrunds einfügen
-    x_offset = (1920 - new_width) // 2
-    y_offset = (1080 - new_height) // 2
-    canvas.paste(image_resized, (x_offset, y_offset))
-
-    # Bild auf max. 300 KB komprimieren
+    # Сохраняем с компрессией до 350 KB
     quality = 95
-    while quality > 10:
-        canvas.save(output_path, "JPEG", quality=quality)
-        if os.path.getsize(output_path) <= 300 * 1024:
+    while quality >= 10:
+        image_resized.save(output_path, "JPEG", quality=quality)
+        if os.path.getsize(output_path) <= 350 * 1024:
             break
         quality -= 5
 
-    # Nachricht anzeigen
-    messagebox.showinfo("Fertig!", f"Das Bild wurde optimiert und gespeichert:\n{output_path}")
+    # Выводим сообщение пользователю
+    messagebox.showinfo("Готово!", f"Изображение сохранено:\n{output_path}")
 
 
-# Hauptfenster erstellen
+# Создаем GUI
 root = tk.Tk()
-root.title("Foto Optimierer")
+root.title("Фото Оптимизатор")
 root.geometry("400x200")
 
-# Button zum Auswählen und Verarbeiten des Bildes
-btn = tk.Button(root, text="Bild auswählen", command=process_image, font=("Arial", 14))
+# Кнопка выбора и обработки изображения
+btn = tk.Button(root, text="Выбрать изображение", command=process_image, font=("Arial", 14))
 btn.pack(pady=50)
 
-# Programm starten
+# Запуск GUI
 root.mainloop()
+
+
 
 
 
